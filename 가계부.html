@@ -124,8 +124,8 @@
 <script>
 const DAYS = ['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
 const API_KEY = '$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
-const BIN_ID = '69cf2a4236566621a874e1c8'; // 고정 Bin ID
-const LOCAL_CACHE = 'gaegyebu-cache-v2';
+const BIN_ID = '69dc85cb856a68218929dbfd';
+const LOCAL_CACHE = 'gaegyebu-cache-v3';
 
 let state = {
   year: new Date().getFullYear(),
@@ -140,7 +140,7 @@ async function readBin() {
   const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
     headers: { 'X-Master-Key': API_KEY }
   });
-  if (!res.ok) throw new Error('read failed');
+  if (!res.ok) throw new Error('read failed: ' + res.status);
   const json = await res.json();
   return json.record;
 }
@@ -154,36 +154,29 @@ async function writeBin(data) {
     },
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('write failed');
+  if (!res.ok) throw new Error('write failed: ' + res.status);
 }
 
 async function loadData() {
   try {
     const data = await readBin();
-    if (data && (data.budget || data.expenses)) {
-      state.budget = data.budget || {};
-      state.expenses = data.expenses || {};
-      localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
-    } else {
-      // bin이 비어있으면 기본 예산 설정
-      state.budget['2026-04'] = { life: 185000, date: 250000 };
-    }
+    state.budget = data.budget || {};
+    state.expenses = data.expenses || {};
+    localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
+    setStatus('저장됨', false);
   } catch(e) {
-    // 오프라인이면 로컬 캐시
+    console.error('불러오기 실패:', e);
     try {
       const local = localStorage.getItem(LOCAL_CACHE);
       if (local) {
         const p = JSON.parse(local);
         state.budget = p.budget || {};
         state.expenses = p.expenses || {};
-      } else {
-        state.budget['2026-04'] = { life: 185000, date: 250000 };
       }
     } catch(e2) {}
     setStatus('오프라인', false, true);
   }
   document.getElementById('loadingOverlay').classList.add('hidden');
-  setStatus('저장됨', false);
   render();
 }
 
@@ -198,6 +191,7 @@ function save() {
       await writeBin(data);
       setStatus('저장됨', false);
     } catch(e) {
+      console.error('저장 실패:', e);
       setStatus('오프라인 저장', false, true);
     }
   }, 800);
@@ -206,7 +200,7 @@ function save() {
 function setStatus(text, saving, error) {
   document.getElementById('saveLabel').textContent = text;
   const dot = document.getElementById('saveDot');
-  dot.className = 'save-dot' + (saving ? ' saving' : error ? ' error' : '');
+  dot.className = 'save-dot' + (saving?' saving':error?' error':'');
 }
 
 function mk() { return `${state.year}-${String(state.month+1).padStart(2,'0')}`; }
