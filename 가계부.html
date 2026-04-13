@@ -123,9 +123,10 @@
 
 <script>
 const DAYS = ['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
-const API_KEY = '$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
+const MASTER_KEY = '$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
+const ACCESS_KEY = '$2a$10$LMphfvZgWwllHtCAzUMm4O4UcDqBdTcnmoQVVeFy/IsPx6g0fK0DW';
 const BIN_ID = '69dc85cb856a68218929dbfd';
-const LOCAL_CACHE = 'gaegyebu-cache-v3';
+const LOCAL_CACHE = 'gaegyebu-cache-v4';
 
 let state = {
   year: new Date().getFullYear(),
@@ -138,7 +139,10 @@ let state = {
 
 async function readBin() {
   const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-    headers: { 'X-Master-Key': API_KEY }
+    headers: {
+      'X-Master-Key': MASTER_KEY,
+      'X-Access-Key': ACCESS_KEY
+    }
   });
   if (!res.ok) throw new Error('read failed: ' + res.status);
   const json = await res.json();
@@ -150,7 +154,8 @@ async function writeBin(data) {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      'X-Master-Key': API_KEY
+      'X-Master-Key': MASTER_KEY,
+      'X-Access-Key': ACCESS_KEY
     },
     body: JSON.stringify(data)
   });
@@ -172,9 +177,12 @@ async function loadData() {
         const p = JSON.parse(local);
         state.budget = p.budget || {};
         state.expenses = p.expenses || {};
+        setStatus('오프라인', false, true);
+      } else {
+        state.budget['2026-04'] = { life: 185000, date: 250000 };
+        setStatus('오프라인', false, true);
       }
     } catch(e2) {}
-    setStatus('오프라인', false, true);
   }
   document.getElementById('loadingOverlay').classList.add('hidden');
   render();
