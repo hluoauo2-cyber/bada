@@ -123,10 +123,8 @@
 
 <script>
 const DAYS = ['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
-const MASTER_KEY = '$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
-const ACCESS_KEY = '$2a$10$LMphfvZgWwllHtCAzUMm4O4UcDqBdTcnmoQVVeFy/IsPx6g0fK0DW';
-const BIN_ID = '69dc85cb856a68218929dbfd';
-const LOCAL_CACHE = 'gaegyebu-cache-v4';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyciQRG6w9FFR-0LBTUOTFiuz9KGyzBwiGlbikx2ItE8KFLwQ3enHIfK4b5deSPSH6K/exec';
+const LOCAL_CACHE = 'gaegyebu-cache-v5';
 
 let state = {
   year: new Date().getFullYear(),
@@ -137,37 +135,30 @@ let state = {
   openDays: {}
 };
 
-async function readBin() {
-  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-    headers: {
-      'X-Master-Key': MASTER_KEY,
-      'X-Access-Key': ACCESS_KEY
-    }
-  });
-  if (!res.ok) throw new Error('read failed: ' + res.status);
-  const json = await res.json();
-  return json.record;
+async function readData() {
+  const res = await fetch(API_URL, { method: 'GET' });
+  if (!res.ok) throw new Error('read failed');
+  const text = await res.text();
+  return text && text !== '{}' ? JSON.parse(text) : null;
 }
 
-async function writeBin(data) {
-  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': MASTER_KEY,
-      'X-Access-Key': ACCESS_KEY
-    },
+async function writeData(data) {
+  await fetch(API_URL, {
+    method: 'POST',
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('write failed: ' + res.status);
 }
 
 async function loadData() {
   try {
-    const data = await readBin();
-    state.budget = data.budget || {};
-    state.expenses = data.expenses || {};
-    localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
+    const data = await readData();
+    if (data && (data.budget || data.expenses)) {
+      state.budget = data.budget || {};
+      state.expenses = data.expenses || {};
+    } else {
+      state.budget['2026-04'] = { life: 185000, date: 250000 };
+    }
+    localStorage.setItem(LOCAL_CACHE, JSON.stringify({ budget: state.budget, expenses: state.expenses }));
     setStatus('저장됨', false);
   } catch(e) {
     console.error('불러오기 실패:', e);
@@ -177,12 +168,11 @@ async function loadData() {
         const p = JSON.parse(local);
         state.budget = p.budget || {};
         state.expenses = p.expenses || {};
-        setStatus('오프라인', false, true);
       } else {
         state.budget['2026-04'] = { life: 185000, date: 250000 };
-        setStatus('오프라인', false, true);
       }
     } catch(e2) {}
+    setStatus('오프라인', false, true);
   }
   document.getElementById('loadingOverlay').classList.add('hidden');
   render();
@@ -196,7 +186,7 @@ function save() {
     const data = { budget: state.budget, expenses: state.expenses };
     localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
     try {
-      await writeBin(data);
+      await writeData(data);
       setStatus('저장됨', false);
     } catch(e) {
       console.error('저장 실패:', e);
