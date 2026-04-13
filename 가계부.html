@@ -70,18 +70,12 @@
   .modal-input{width:100%;font-size:15px;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;font-family:'Noto Sans KR',sans-serif;color:#1a1a1a;}
   .modal-btn{width:100%;padding:14px;background:#1a1a1a;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;margin-top:6px;}
   .hidden{display:none;}
-  .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.9);z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;}
-  .loading-spinner{width:32px;height:32px;border:3px solid #ebebeb;border-top-color:#1a1a1a;border-radius:50%;animation:spin 0.8s linear infinite;}
+  .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.9);z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:14px;color:#888;font-family:'Noto Sans KR',sans-serif;}
+  .spinner{width:24px;height:24px;border:2px solid #ebebeb;border-top-color:#1a1a1a;border-radius:50%;animation:spin 0.8s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
-  .loading-text{font-size:14px;color:#888;}
 </style>
 </head>
 <body>
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="loading-spinner"></div>
-  <div class="loading-text">데이터 불러오는 중...</div>
-</div>
-
 <div class="container">
   <div class="header">
     <div class="header-top">
@@ -92,7 +86,7 @@
       </div>
       <div class="save-badge">
         <div class="save-dot" id="saveDot"></div>
-        <span id="saveLabel">저장됨</span>
+        <span id="saveLabel">불러오는 중...</span>
       </div>
     </div>
     <div class="budget-section">
@@ -122,86 +116,115 @@
   </div>
 </div>
 
-<script>
-const DAYS=['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
-const API_KEY='$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
-const BIN_ID_KEY='gaegyebu-binid-v2';
-let BIN_ID=localStorage.getItem(BIN_ID_KEY)||null;
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div>데이터 불러오는 중...</div>
+</div>
 
-let state={
-  year:new Date().getFullYear(),
-  month:new Date().getMonth(),
-  activeWeek:0,
-  budget:{},
-  expenses:{},
-  openDays:{}
+<script>
+const DAYS = ['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
+const API_KEY = '$2a$10$6iDYgar8yYgaVrG.zlifU.fU0WH.oWAJ8H/z.Qc/CBJkL0yFbhv4S';
+const BIN_ID = '69cf2a4236566621a874e1c8'; // 고정 Bin ID
+const LOCAL_CACHE = 'gaegyebu-cache-v2';
+
+let state = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth(),
+  activeWeek: 0,
+  budget: {},
+  expenses: {},
+  openDays: {}
 };
 
-async function loadFromCloud(){
-  if(!BIN_ID){
-    try{
-      const res=await fetch('https://api.jsonbin.io/v3/b',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','X-Master-Key':API_KEY,'X-Bin-Name':'가계부'},
-        body:JSON.stringify({budget:{},expenses:{}})
-      });
-      const data=await res.json();
-      BIN_ID=data.metadata.id;
-      localStorage.setItem(BIN_ID_KEY,BIN_ID);
-    }catch(e){console.error('bin 생성 실패',e);}
-    return;
+async function readBin() {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+    headers: { 'X-Master-Key': API_KEY }
+  });
+  if (!res.ok) throw new Error('read failed');
+  const json = await res.json();
+  return json.record;
+}
+
+async function writeBin(data) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': API_KEY
+    },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('write failed');
+}
+
+async function loadData() {
+  try {
+    const data = await readBin();
+    if (data && (data.budget || data.expenses)) {
+      state.budget = data.budget || {};
+      state.expenses = data.expenses || {};
+      localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
+    } else {
+      // bin이 비어있으면 기본 예산 설정
+      state.budget['2026-04'] = { life: 185000, date: 250000 };
+    }
+  } catch(e) {
+    // 오프라인이면 로컬 캐시
+    try {
+      const local = localStorage.getItem(LOCAL_CACHE);
+      if (local) {
+        const p = JSON.parse(local);
+        state.budget = p.budget || {};
+        state.expenses = p.expenses || {};
+      } else {
+        state.budget['2026-04'] = { life: 185000, date: 250000 };
+      }
+    } catch(e2) {}
+    setStatus('오프라인', false, true);
   }
-  try{
-    const res=await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`,{
-      headers:{'X-Master-Key':API_KEY}
-    });
-    const data=await res.json();
-    if(data.record){
-      state.budget=data.record.budget||{};
-      state.expenses=data.record.expenses||{};
-    }
-  }catch(e){console.error('불러오기 실패',e);}
+  document.getElementById('loadingOverlay').classList.add('hidden');
+  setStatus('저장됨', false);
+  render();
 }
 
-let saveTimer=null;
-function saveToCloud(){
-  const dot=document.getElementById('saveDot');
-  const lbl=document.getElementById('saveLabel');
-  dot.className='save-dot saving';
-  lbl.textContent='저장 중...';
+let saveTimer = null;
+function save() {
+  setStatus('저장 중...', true);
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(async()=>{
-    try{
-      await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`,{
-        method:'PUT',
-        headers:{'Content-Type':'application/json','X-Master-Key':API_KEY},
-        body:JSON.stringify({budget:state.budget,expenses:state.expenses})
-      });
-      dot.className='save-dot';
-      lbl.textContent='저장됨';
-    }catch(e){
-      dot.className='save-dot error';
-      lbl.textContent='저장 실패';
+  saveTimer = setTimeout(async () => {
+    const data = { budget: state.budget, expenses: state.expenses };
+    localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
+    try {
+      await writeBin(data);
+      setStatus('저장됨', false);
+    } catch(e) {
+      setStatus('오프라인 저장', false, true);
     }
-  },800);
+  }, 800);
 }
 
-function mk(){return `${state.year}-${String(state.month+1).padStart(2,'0')}`;}
-function ek(w,d){return `${mk()}-w${w}-d${d}`;}
-function fmt(n){return Math.round(n).toLocaleString('ko-KR')+'원';}
-function pct(u,t){return t>0?Math.min(100,Math.round(u/t*100)):0;}
-function barColor(p,base){return p>=100?'#e84545':p>=80?'#f0a500':base;}
+function setStatus(text, saving, error) {
+  document.getElementById('saveLabel').textContent = text;
+  const dot = document.getElementById('saveDot');
+  dot.className = 'save-dot' + (saving ? ' saving' : error ? ' error' : '');
+}
 
-function getWeeks(){
+function mk() { return `${state.year}-${String(state.month+1).padStart(2,'0')}`; }
+function ek(w,d) { return `${mk()}-w${w}-d${d}`; }
+function fmt(n) { return Math.round(n).toLocaleString('ko-KR')+'원'; }
+function pct(used,total) { return total>0?Math.min(100,Math.round(used/total*100)):0; }
+function barColor(p,base) { return p>=100?'#e84545':p>=80?'#f0a500':base; }
+
+function getWeeks() {
   const y=state.year,m=state.month;
   const last=new Date(y,m+1,0).getDate();
-  const fd=new Date(y,m,1).getDay();
-  const off=fd===0?6:fd-1;
+  const firstDow=new Date(y,m,1).getDay();
+  const offset=firstDow===0?6:firstDow-1;
   let weeks=[];
   for(let ww=0;ww<6;ww++){
     let days=[];
     for(let dd=0;dd<7;dd++){
-      const date=1-off+ww*7+dd;
+      const date=1-offset+ww*7+dd;
       if(date>=1&&date<=last) days.push({date,dayIdx:dd});
     }
     if(days.length) weeks.push({weekNum:ww,days});
@@ -209,23 +232,23 @@ function getWeeks(){
   return weeks;
 }
 
-function usedByCat(){
-  const m=mk();let life=0,date=0;
+function usedByCat() {
+  const m=mk(); let life=0,date=0;
   Object.keys(state.expenses).forEach(k=>{
-    if(!k.startsWith(m))return;
+    if(!k.startsWith(m)) return;
     (state.expenses[k]||[]).forEach(e=>{
       const a=parseFloat(e.amount)||0;
-      if(e.cat==='date')date+=a;else life+=a;
+      if(e.cat==='date') date+=a; else life+=a;
     });
   });
-  return{life,date};
+  return {life,date};
 }
 
-function renderBudgetBars(){
+function renderBudgetBars() {
   const b=state.budget[mk()]||{life:0,date:0};
   const used=usedByCat();
   ['life','date'].forEach(cat=>{
-    const total=b[cat]||0,u=used[cat],p2=pct(u,total);
+    const total=b[cat]||0, u=used[cat], p2=pct(u,total);
     const color=cat==='life'?'#4caf7d':'#4a90e2';
     const label=cat==='life'?'생활비':'데이트';
     document.getElementById(cat+'BudgetBar').innerHTML=`
@@ -233,24 +256,26 @@ function renderBudgetBars(){
         <div class="budget-label"><span class="budget-dot" style="background:${color}"></span>${label}</div>
         <div class="budget-amounts">${total>0?`${fmt(u)} / <span>${fmt(total)}</span> (${p2}%)`:'예산 미설정'}</div>
       </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${p2}%;background:${barColor(p2,color)};"></div></div>`;
+      <div class="bar-track"><div class="bar-fill" style="width:${p2}%;background:${barColor(p2,color)};"></div></div>
+    `;
   });
 }
 
-function renderSummary(){
+function renderSummary() {
   const b=state.budget[mk()]||{life:0,date:0};
   const used=usedByCat();
-  const lr=b.life-used.life,dr=b.date-used.date,tr=lr+dr;
+  const lr=b.life-used.life, dr=b.date-used.date, tr=lr+dr;
   const has=b.life>0||b.date>0;
   document.getElementById('summaryGrid').innerHTML=`
     <div class="summary-card"><div class="lbl">생활비 남은</div><div class="val ${b.life>0?(lr<0?'danger':'ok'):'neutral'}">${b.life>0?fmt(lr):'미설정'}</div></div>
     <div class="summary-card"><div class="lbl">데이트 남은</div><div class="val ${b.date>0?(dr<0?'danger':'ok'):'neutral'}">${b.date>0?fmt(dr):'미설정'}</div></div>
-    <div class="summary-card"><div class="lbl">총 남은</div><div class="val ${has?(tr<0?'danger':'ok'):'neutral'}">${has?fmt(tr):'-'}</div></div>`;
+    <div class="summary-card"><div class="lbl">총 남은</div><div class="val ${has?(tr<0?'danger':'ok'):'neutral'}">${has?fmt(tr):'-'}</div></div>
+  `;
 }
 
-function renderWeekTabs(){
+function renderWeekTabs() {
   const weeks=getWeeks();
-  if(state.activeWeek>=weeks.length)state.activeWeek=0;
+  if(state.activeWeek>=weeks.length) state.activeWeek=0;
   document.getElementById('weekTabs').innerHTML=weeks.map((w,i)=>
     `<button class="week-tab ${state.activeWeek===i?'active':''}" onclick="setWeek(${i})">${i+1}주차</button>`
   ).join('');
@@ -258,35 +283,36 @@ function renderWeekTabs(){
 
 function setWeek(i){state.activeWeek=i;renderWeekTabs();renderDays();}
 
-function renderDays(){
+function renderDays() {
   const weeks=getWeeks();
   const week=weeks[state.activeWeek]||weeks[0];
-  if(!week)return;
+  if(!week) return;
   const list=document.getElementById('dayList');
   list.innerHTML='';
   week.days.forEach(({date,dayIdx})=>{
     const k=ek(state.activeWeek,dayIdx);
     const items=state.expenses[k]||[];
-    const lt=items.filter(e=>e.cat!=='date').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-    const dt=items.filter(e=>e.cat==='date').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const lifeTotal=items.filter(e=>e.cat!=='date').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const dateTotal=items.filter(e=>e.cat==='date').reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
     const isOpen=!!state.openDays[k];
     const card=document.createElement('div');
     card.className='day-card';
     let chips='';
-    if(lt>0)chips+=`<span class="chip chip-life">생활비 ${fmt(lt)}</span>`;
-    if(dt>0)chips+=`<span class="chip chip-date">데이트 ${fmt(dt)}</span>`;
-    if(!lt&&!dt)chips=`<span class="chip chip-none">지출 없음</span>`;
+    if(lifeTotal>0) chips+=`<span class="chip chip-life">생활비 ${fmt(lifeTotal)}</span>`;
+    if(dateTotal>0) chips+=`<span class="chip chip-date">데이트 ${fmt(dateTotal)}</span>`;
+    if(!lifeTotal&&!dateTotal) chips=`<span class="chip chip-none">지출 없음</span>`;
     card.innerHTML=`
       <div class="day-header" onclick="toggleDay('${k}')">
         <div><span class="day-name">${DAYS[dayIdx]}</span><span class="day-date">${state.month+1}월 ${date}일</span></div>
         <div class="day-right">${chips}<span class="arrow ${isOpen?'open':''}">▼</span></div>
       </div>
-      ${isOpen?renderBody(k,items):''}`;
+      ${isOpen?renderBody(k,items):''}
+    `;
     list.appendChild(card);
   });
 }
 
-function renderBody(k,items){
+function renderBody(k,items) {
   let rows=items.map((item,idx)=>`
     <div class="expense-row">
       <select class="cat-select" onchange="updateExp('${k}',${idx},'cat',this.value)">
@@ -296,29 +322,30 @@ function renderBody(k,items){
       <input type="text" class="desc-input" placeholder="내용" value="${(item.desc||'').replace(/"/g,'&quot;')}" oninput="updateExp('${k}',${idx},'desc',this.value)"/>
       <input type="number" class="amt-input" placeholder="금액" value="${item.amount||''}" oninput="updateExp('${k}',${idx},'amount',this.value)"/>
       <button class="del-btn" onclick="delExp('${k}',${idx})">✕</button>
-    </div>`).join('');
+    </div>
+  `).join('');
   return `<div class="day-body">${rows}<button class="add-expense-btn" onclick="addExp('${k}')">+ 내역 추가</button></div>`;
 }
 
 function toggleDay(k){state.openDays[k]=!state.openDays[k];renderDays();}
 
 function addExp(k){
-  if(!state.expenses[k])state.expenses[k]=[];
+  if(!state.expenses[k]) state.expenses[k]=[];
   state.expenses[k].push({cat:'life',desc:'',amount:''});
   state.openDays[k]=true;
-  saveToCloud();renderDays();renderSummary();renderBudgetBars();
+  save();renderDays();renderSummary();renderBudgetBars();
 }
 
 function updateExp(k,idx,field,val){
-  if(!state.expenses[k])state.expenses[k]=[];
+  if(!state.expenses[k]) state.expenses[k]=[];
   state.expenses[k][idx][field]=val;
-  saveToCloud();renderSummary();renderBudgetBars();
-  if(field==='cat')renderDays();
+  save();renderSummary();renderBudgetBars();
+  if(field==='cat') renderDays();
 }
 
 function delExp(k,idx){
   state.expenses[k].splice(idx,1);
-  saveToCloud();renderDays();renderSummary();renderBudgetBars();
+  save();renderDays();renderSummary();renderBudgetBars();
 }
 
 function render(){
@@ -334,10 +361,11 @@ document.getElementById('nextBtn').onclick=()=>{
   if(state.month===11){state.month=0;state.year++;}else state.month++;
   state.activeWeek=0;render();
 };
+
 document.getElementById('fabBtn').onclick=()=>{
   const b=state.budget[mk()]||{life:0,date:0};
-  if(b.life>0)document.getElementById('lifeInput').value=b.life;
-  if(b.date>0)document.getElementById('dateInput').value=b.date;
+  if(b.life>0) document.getElementById('lifeInput').value=b.life;
+  if(b.date>0) document.getElementById('dateInput').value=b.date;
   document.getElementById('modalOverlay').classList.remove('hidden');
 };
 document.getElementById('modalOverlay').onclick=e=>{
@@ -347,18 +375,14 @@ document.getElementById('modalOverlay').onclick=e=>{
 document.getElementById('saveBudgetBtn').onclick=()=>{
   const life=parseFloat(document.getElementById('lifeInput').value)||0;
   const date=parseFloat(document.getElementById('dateInput').value)||0;
-  if(!state.budget[mk()])state.budget[mk()]={life:0,date:0};
-  if(life>0)state.budget[mk()].life=life;
-  if(date>0)state.budget[mk()].date=date;
-  saveToCloud();render();
+  if(!state.budget[mk()]) state.budget[mk()]={life:0,date:0};
+  if(life>0) state.budget[mk()].life=life;
+  if(date>0) state.budget[mk()].date=date;
+  save();render();
   document.getElementById('modalOverlay').classList.add('hidden');
 };
 
-loadFromCloud().then(()=>{
-  if(!state.budget['2026-04'])state.budget['2026-04']={life:185000,date:250000};
-  render();
-  document.getElementById('loadingOverlay').style.display='none';
-});
+loadData();
 </script>
 </body>
 </html>
