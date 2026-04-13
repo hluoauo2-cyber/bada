@@ -116,15 +116,15 @@
   </div>
 </div>
 
-<div class="loading-overlay" id="loadingOverlay">
+<div class="loading-overlay hidden" id="loadingOverlay">
   <div class="spinner"></div>
   <div>데이터 불러오는 중...</div>
 </div>
 
 <script>
 const DAYS = ['월요일','화요일','수요일','목요일','금요일','토요일','일요일'];
-const API_URL = 'https://script.google.com/macros/s/AKfycbyciQRG6w9FFR-0LBTUOTFiuz9KGyzBwiGlbikx2ItE8KFLwQ3enHIfK4b5deSPSH6K/exec';
-const LOCAL_CACHE = 'gaegyebu-cache-v5';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyciQRG6w9FFR-0LBTUOTFiuz9KGyzBwiGlbikx2ItE8KFLwQ3enHIfK4b5deSPSH6K/exec';
+const LOCAL_CACHE = 'gaegyebu-cache-v6';
 
 let state = {
   year: new Date().getFullYear(),
@@ -134,10 +134,6 @@ let state = {
   expenses: {},
   openDays: {}
 };
-
-function hideLoading() {
-  document.getElementById('loadingOverlay').classList.add('hidden');
-}
 
 function loadFromCache() {
   try {
@@ -153,42 +149,53 @@ function loadFromCache() {
   return false;
 }
 
-// 타임아웃 포함 fetch
-function fetchWithTimeout(url, options, ms) {
-  return Promise.race([
-    fetch(url, options),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
-  ]);
+function saveToCache() {
+  localStorage.setItem(LOCAL_CACHE, JSON.stringify({ budget: state.budget, expenses: state.expenses }));
 }
 
+// GET: iframe 트릭으로 CORS 우회
 async function readData() {
-  const res = await fetchWithTimeout(API_URL, { method: 'GET' }, 4000);
-  if (!res.ok) throw new Error('read failed');
-  const text = await res.text();
-  return text && text !== '{}' ? JSON.parse(text) : null;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timeout')), 5000);
+    fetch(SCRIPT_URL + '?t=' + Date.now())
+      .then(r => r.text())
+      .then(text => {
+        clearTimeout(timeout);
+        try {
+          const data = JSON.parse(text);
+          resolve(data);
+        } catch(e) {
+          resolve(null);
+        }
+      })
+      .catch(e => { clearTimeout(timeout); reject(e); });
+  });
 }
 
-async function writeData(data) {
-  await fetchWithTimeout(API_URL, { method: 'POST', body: JSON.stringify(data) }, 5000);
+// POST: no-cors로 저장 (fire-and-forget)
+function writeData(data) {
+  const encoded = encodeURIComponent(JSON.stringify(data));
+  // GET 방식으로 데이터 전송 (CORS 우회)
+  const img = new Image();
+  img.src = SCRIPT_URL + '?data=' + encoded + '&t=' + Date.now();
 }
 
 async function loadData() {
-  // 로컬 캐시로 먼저 보여주기 (빠르게)
   loadFromCache();
-  hideLoading();
-  setStatus('동기화 중...', true);
   render();
+  setStatus('동기화 중...', true);
 
-  // 백그라운드에서 서버 데이터 불러오기
   try {
     const data = await readData();
     if (data && (data.budget || data.expenses)) {
       state.budget = data.budget || {};
       state.expenses = data.expenses || {};
-      localStorage.setItem(LOCAL_CACHE, JSON.stringify({ budget: state.budget, expenses: state.expenses }));
+      saveToCache();
       render();
+      setStatus('저장됨', false);
+    } else {
+      setStatus('저장됨', false);
     }
-    setStatus('저장됨', false);
   } catch(e) {
     setStatus('오프라인', false, true);
   }
@@ -198,15 +205,11 @@ let saveTimer = null;
 function save() {
   setStatus('저장 중...', true);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     const data = { budget: state.budget, expenses: state.expenses };
-    localStorage.setItem(LOCAL_CACHE, JSON.stringify(data));
-    try {
-      await writeData(data);
-      setStatus('저장됨', false);
-    } catch(e) {
-      setStatus('오프라인 저장', false, true);
-    }
+    saveToCache();
+    writeData(data);
+    setStatus('저장됨', false);
   }, 800);
 }
 
