@@ -135,47 +135,63 @@ let state = {
   openDays: {}
 };
 
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+function loadFromCache() {
+  try {
+    const local = localStorage.getItem(LOCAL_CACHE);
+    if (local) {
+      const p = JSON.parse(local);
+      state.budget = p.budget || {};
+      state.expenses = p.expenses || {};
+      return true;
+    }
+  } catch(e) {}
+  state.budget['2026-04'] = { life: 185000, date: 250000 };
+  return false;
+}
+
+// 타임아웃 포함 fetch
+function fetchWithTimeout(url, options, ms) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
+
 async function readData() {
-  const res = await fetch(API_URL, { method: 'GET' });
+  const res = await fetchWithTimeout(API_URL, { method: 'GET' }, 4000);
   if (!res.ok) throw new Error('read failed');
   const text = await res.text();
   return text && text !== '{}' ? JSON.parse(text) : null;
 }
 
 async function writeData(data) {
-  await fetch(API_URL, {
-    method: 'POST',
-    body: JSON.stringify(data)
-  });
+  await fetchWithTimeout(API_URL, { method: 'POST', body: JSON.stringify(data) }, 5000);
 }
 
 async function loadData() {
+  // 로컬 캐시로 먼저 보여주기 (빠르게)
+  loadFromCache();
+  hideLoading();
+  setStatus('동기화 중...', true);
+  render();
+
+  // 백그라운드에서 서버 데이터 불러오기
   try {
     const data = await readData();
     if (data && (data.budget || data.expenses)) {
       state.budget = data.budget || {};
       state.expenses = data.expenses || {};
-    } else {
-      state.budget['2026-04'] = { life: 185000, date: 250000 };
+      localStorage.setItem(LOCAL_CACHE, JSON.stringify({ budget: state.budget, expenses: state.expenses }));
+      render();
     }
-    localStorage.setItem(LOCAL_CACHE, JSON.stringify({ budget: state.budget, expenses: state.expenses }));
     setStatus('저장됨', false);
   } catch(e) {
-    console.error('불러오기 실패:', e);
-    try {
-      const local = localStorage.getItem(LOCAL_CACHE);
-      if (local) {
-        const p = JSON.parse(local);
-        state.budget = p.budget || {};
-        state.expenses = p.expenses || {};
-      } else {
-        state.budget['2026-04'] = { life: 185000, date: 250000 };
-      }
-    } catch(e2) {}
     setStatus('오프라인', false, true);
   }
-  document.getElementById('loadingOverlay').classList.add('hidden');
-  render();
 }
 
 let saveTimer = null;
@@ -189,7 +205,6 @@ function save() {
       await writeData(data);
       setStatus('저장됨', false);
     } catch(e) {
-      console.error('저장 실패:', e);
       setStatus('오프라인 저장', false, true);
     }
   }, 800);
